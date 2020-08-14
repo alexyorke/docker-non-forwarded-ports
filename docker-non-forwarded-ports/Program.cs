@@ -15,13 +15,24 @@ namespace docker_port
 {
     internal class Program
     {
-        private static readonly string DOCKER_TEMP_FILE_LOCATION = Path.GetTempFileName();
+        private static readonly string DockerTempFileLocation = Path.GetTempFileName();
 
-        private static async Task Main(string[] args)
+        [Obsolete]
+        private static async Task Main()
         {
             var client = new DockerClientConfiguration(
                     new Uri("npipe://./pipe/docker_engine"))
                 .CreateClient();
+
+            try
+            {
+                await client.System.PingAsync();
+            }
+            catch (Exception)
+            {
+                Console.WriteLine("Docker is not running");
+                return;
+            }
 
             var cancellation = new CancellationTokenSource();
             var stream = await client.System.MonitorEventsAsync(new ContainerEventsParameters(), cancellation.Token);
@@ -53,20 +64,19 @@ namespace docker_port
 
         private static async Task HandleContainerInjection(DockerClient client, JToken parsedBuffer)
         {
-            Console.WriteLine(parsedBuffer["status"] + "->" + parsedBuffer["id"]);
+            Console.WriteLine($"{parsedBuffer["status"]}->{parsedBuffer["id"]}");
 
             // wait for container to finish booting
             await Task.Delay(5000);
-            var strCmdText = "docker exec -it " + parsedBuffer["id"] +
-                             " /bin/bash -c \"echo YXdrICdmdW5jdGlvbiBoZXh0b2RlYyhzdHIscmV0LG4saSxrLGMpewogICAgcmV0ID0gMAogICAgbiA9IGxlbmd0aChzdHIpCiAgICBmb3IgKGkgPSAxOyBpIDw9IG47IGkrKykgewogICAgICAgIGMgPSB0b2xvd2VyKHN1YnN0cihzdHIsIGksIDEpKQogICAgICAgIGsgPSBpbmRleCgiMTIzNDU2Nzg5YWJjZGVmIiwgYykKICAgICAgICByZXQgPSByZXQgKiAxNiArIGsKICAgIH0KICAgIHJldHVybiByZXQKfQpmdW5jdGlvbiBnZXRJUChzdHIscmV0KXsKICAgIHJldD1oZXh0b2RlYyhzdWJzdHIoc3RyLGluZGV4KHN0ciwiOiIpLTIsMikpOyAKICAgIGZvciAoaT01OyBpPjA7IGktPTIpIHsKICAgICAgICByZXQgPSByZXQiLiJoZXh0b2RlYyhzdWJzdHIoc3RyLGksMikpCiAgICB9CiAgICByZXQgPSByZXQiOiJoZXh0b2RlYyhzdWJzdHIoc3RyLGluZGV4KHN0ciwiOiIpKzEsNCkpCiAgICByZXR1cm4gcmV0Cn0gCk5SID4gMSB7e2xvY2FsPWdldElQKCQyKTtyZW1vdGU9Z2V0SVAoJDMpfXtwcmludCBsb2NhbCIgLSAicmVtb3RlfX0nIC9wcm9jL25ldC90Y3AgL3Byb2MvbmV0L3RjcDY= | base64 --decode | bash\" > " +
-                             DOCKER_TEMP_FILE_LOCATION;
+            var strCmdText =
+                $"docker exec -it {parsedBuffer["id"]} /bin/bash -c \"echo YXdrICdmdW5jdGlvbiBoZXh0b2RlYyhzdHIscmV0LG4saSxrLGMpewogICAgcmV0ID0gMAogICAgbiA9IGxlbmd0aChzdHIpCiAgICBmb3IgKGkgPSAxOyBpIDw9IG47IGkrKykgewogICAgICAgIGMgPSB0b2xvd2VyKHN1YnN0cihzdHIsIGksIDEpKQogICAgICAgIGsgPSBpbmRleCgiMTIzNDU2Nzg5YWJjZGVmIiwgYykKICAgICAgICByZXQgPSByZXQgKiAxNiArIGsKICAgIH0KICAgIHJldHVybiByZXQKfQpmdW5jdGlvbiBnZXRJUChzdHIscmV0KXsKICAgIHJldD1oZXh0b2RlYyhzdWJzdHIoc3RyLGluZGV4KHN0ciwiOiIpLTIsMikpOyAKICAgIGZvciAoaT01OyBpPjA7IGktPTIpIHsKICAgICAgICByZXQgPSByZXQiLiJoZXh0b2RlYyhzdWJzdHIoc3RyLGksMikpCiAgICB9CiAgICByZXQgPSByZXQiOiJoZXh0b2RlYyhzdWJzdHIoc3RyLGluZGV4KHN0ciwiOiIpKzEsNCkpCiAgICByZXR1cm4gcmV0Cn0gCk5SID4gMSB7e2xvY2FsPWdldElQKCQyKTtyZW1vdGU9Z2V0SVAoJDMpfXtwcmludCBsb2NhbCIgLSAicmVtb3RlfX0nIC9wcm9jL25ldC90Y3AgL3Byb2MvbmV0L3RjcDY= | base64 --decode | bash\" > {DockerTempFileLocation}";
             RunCommand(strCmdText);
-            var lines = File.ReadAllLines(DOCKER_TEMP_FILE_LOCATION);
+            var lines = await File.ReadAllLinesAsync(DockerTempFileLocation);
             var ports = new List<int>();
             ExtractDockerPorts(lines, ports);
             var output = client.Containers.InspectContainerAsync(parsedBuffer["id"].ToString(), CancellationToken.None);
 
-            var matchingPorts = new List<int>();
+            List<int> matchingPorts;
             try
             {
                 matchingPorts = output.Result.NetworkSettings.Ports.Keys.Select(s => int.Parse(s.Split("/")[0]))
@@ -84,11 +94,11 @@ namespace docker_port
                 Console.Beep();
                 Console.Beep();
                 Console.Beep();
-                Console.WriteLine("Warning: container " + parsedBuffer["id"] + " does not have any forwarded ports.");
+                Console.WriteLine($"Warning: container {parsedBuffer["id"]} does not have any forwarded ports.");
             }
         }
 
-        private static void ExtractDockerPorts(string[] lines, List<int> ports)
+        private static void ExtractDockerPorts(IEnumerable<string> lines, ICollection<int> ports)
         {
             foreach (var line in lines)
                 try
@@ -103,14 +113,16 @@ namespace docker_port
 
         private static void RunCommand(string command)
         {
-            var proc1 = new ProcessStartInfo();
-            proc1.UseShellExecute = true;
-            proc1.WorkingDirectory = Path.GetDirectoryName(DOCKER_TEMP_FILE_LOCATION);
+            var proc = new ProcessStartInfo
+            {
+                UseShellExecute = true,
+                WorkingDirectory = Path.GetDirectoryName(DockerTempFileLocation) ?? string.Empty,
+                FileName = @"C:\Windows\System32\cmd.exe",
+                Arguments = $"/c {command}",
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
 
-            proc1.FileName = @"C:\Windows\System32\cmd.exe";
-            proc1.Arguments = "/c " + command;
-            proc1.WindowStyle = ProcessWindowStyle.Hidden;
-            Process.Start(proc1);
+            Process.Start(proc);
         }
     }
 }
