@@ -7,7 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Docker.DotNet" Version="3.125.2" />
+    <PackageReference Include="Docker.DotNet" Version="3.125.15" />
     <PackageReference Include="SharpNetSH" Version="2.0.5" />
   </ItemGroup>
 
